@@ -100,8 +100,15 @@ function scanFolder(rootFolder: string, includeImages: boolean): VideoFile[] {
   return videos;
 }
 
+// Enable CORS for dev environment, but unnecessary in production since we host on the exact same port
 app.use(cors());
 app.use(express.json());
+
+// Serve static React production build
+const DIST_PATH = path.join(process.cwd(), 'dist');
+if (fs.existsSync(DIST_PATH)) {
+  app.use(express.static(DIST_PATH));
+}
 
 // GET config
 app.get('/api/config', (_req, res) => {
@@ -215,6 +222,16 @@ app.post('/api/playlists', (req, res) => {
   const p = path.join(process.cwd(), 'wallstream.playlists.json');
   fs.writeFileSync(p, JSON.stringify(req.body, null, 2));
   res.json({ ok: true });
+});
+
+// Catch-all middleware for React Single Page App routing (avoids Express 5 PathError)
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  if (fs.existsSync(DIST_PATH)) {
+    res.sendFile(path.join(DIST_PATH, 'index.html'));
+  } else {
+    res.status(404).send('WallStream production build not found. Please run npm run build first.');
+  }
 });
 
 app.listen(PORT, () => {

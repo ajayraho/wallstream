@@ -1,6 +1,6 @@
 import type { AppConfig, Playlist, VideoFile } from './types';
 
-const BASE = 'http://localhost:3001/api';
+const BASE = '/api';
 
 export async function fetchConfig(): Promise<AppConfig> {
   const r = await fetch(`${BASE}/config`);
