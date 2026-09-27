@@ -3,6 +3,10 @@ import type { VideoFile } from '../types';
 import { videoStreamUrl } from '../api';
 import { useStore } from '../store';
 
+// How long a card must stay in view before we actually start loading it —
+// avoids paying the real streaming/decoding cost for cards you scroll straight past.
+const DWELL_MS = 220;
+
 interface Props {
   video: VideoFile;
   index: number;
@@ -19,10 +23,10 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
   const [playing, setPlaying]   = useState(false); // also acts as "loaded" for images
   const [hovered, setHovered]   = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(1);
-  const [aspect,  setAspect]    = useState<number>(16/9);
+  const [duration, setDuration] = useState(video.duration && video.duration > 0 ? video.duration : 1);
+  const [aspect,  setAspect]    = useState<number>(video.width && video.height ? video.width / video.height : 16/9);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const srcLoaded = useRef(false);
+  const [srcLoaded, setSrcLoaded] = useState(false);
 
   const isHuge = video.type === 'video' && video.size > 500 * 1024 * 1024;
 
@@ -39,30 +43,39 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
   }, []);
 
   /* ── Mount / Unmount src ── */
+  // Gated behind a short dwell timer: a card only actually starts streaming once
+  // it's been visible continuously for DWELL_MS. Scrolling straight past a card
+  // cancels the timer before it ever fires, so fast scrolling never touches the
+  // archive at all — only cards you actually stop on (or hover, or Wall Mode) do.
   useEffect(() => {
     if (isHuge || video.type === 'image') return; // images handle their own src lazily in render
 
-    const vid = videoRef.current;
-    if (!vid) return;
-
-    if (visible && !srcLoaded.current) {
-      vid.src = videoStreamUrl(video.id);
-      vid.preload = 'metadata';
-      srcLoaded.current = true;
+    if (visible && !srcLoaded) {
+      const timer = setTimeout(() => {
+        const vid = videoRef.current;
+        if (!vid) return;
+        vid.src = videoStreamUrl(video.id);
+        vid.preload = 'metadata';
+        setSrcLoaded(true);
+      }, DWELL_MS);
+      return () => clearTimeout(timer);
     }
 
-    if (!visible && srcLoaded.current) {
-      vid.pause();
-      vid.removeAttribute('src'); // critical for memory
-      vid.load();
-      srcLoaded.current = false;
+    if (!visible && srcLoaded) {
+      const vid = videoRef.current;
+      if (vid) {
+        vid.pause();
+        vid.removeAttribute('src'); // critical for memory
+        vid.load();
+      }
+      setSrcLoaded(false);
       setPlaying(false); // re-show placeholder
     }
-  }, [visible, video.id, video.type]);
+  }, [visible, srcLoaded, video.id, video.type]);
 
   /* ── Play / Pause Logic (Wall Mode & Hover) ── */
   useEffect(() => {
-    if (isHuge || video.type === 'image' || !srcLoaded.current) return;
+    if (isHuge || video.type === 'image' || !srcLoaded) return;
     const vid = videoRef.current;
     if (!vid) return;
 
@@ -76,7 +89,7 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
       vid.pause();
       if (!state.wallMode) vid.currentTime = 0;
     }
-  }, [visible, hovered, state.wallMode, state.muted, video.type]);
+  }, [visible, hovered, state.wallMode, state.muted, video.type, srcLoaded]);
 
   /* ── Play on hover ── */
   const handleEnter = useCallback(() => {
@@ -200,6 +213,12 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
       )}
 
       <div className="vcard-badge">{ext}</div>
+
+      {video.type === 'video' && duration > 1 && (
+        <div className="vcard-duration">
+          {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
+        </div>
+      )}
 
       <div className={`vcard-actions${drawerOpen ? ' force-show' : ''}`} onClick={e => e.stopPropagation()}>
         {drawerOpen && (
