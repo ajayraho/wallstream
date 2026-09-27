@@ -1,5 +1,6 @@
 import { useStore } from '../store';
 import type { GridSize, SortMode } from '../types';
+import SystemMonitor from './SystemMonitor';
 
 type Page = 'library' | 'playlists' | 'settings';
 
@@ -10,7 +11,7 @@ interface Props {
 
 export default function Topbar({ page, onPage }: Props) {
   const { state, dispatch } = useStore();
-  const { search, sortMode, viewMode, gridSize, muted } = state;
+  const { search, sortMode, sortReverse, viewMode, gridSize, muted } = state;
 
   return (
     <header className="topbar">
@@ -100,6 +101,22 @@ export default function Topbar({ page, onPage }: Props) {
             ))}
           </div>
 
+          {/* Reverse sort order */}
+          <button
+            className={`ico-btn${sortReverse ? ' active' : ''}`}
+            title={sortReverse ? 'Sorted reversed — click to un-reverse' : 'Reverse sort order'}
+            id="btn-sort-reverse"
+            onClick={() => dispatch({ type: 'TOGGLE_SORT_REVERSE' })}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={14} height={14} style={{ transform: sortReverse ? 'scaleY(-1)' : undefined, transition: 'transform var(--t)' }}>
+              <path d="M3 7h11" />
+              <path d="M3 12h7" />
+              <path d="M3 17h4" />
+              <path d="M17 4v16" />
+              <path d="M13 8l4-4 4 4" />
+            </svg>
+          </button>
+
           {/* View mode */}
           <button
             className={`ico-btn${viewMode === 'folder-group' ? ' active' : ''}`}
@@ -130,6 +147,11 @@ export default function Topbar({ page, onPage }: Props) {
           </div>
         </div>
       )}
+
+      {/* Always visible, regardless of page */}
+      <div style={{ marginLeft: page === 'library' ? 0 : 'auto' }}>
+        <SystemMonitor />
+      </div>
     </header>
   );
 }

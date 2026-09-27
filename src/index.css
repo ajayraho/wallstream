@@ -905,3 +905,46 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .vcard { animation: up-in 0.35s var(--ease) both; }
+
+/* ─── System monitor panel ──────────────────────────────── */
+.sysmon-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 260px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  z-index: 250;
+}
+.sysmon-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+}
+
+.vcard-duration {
+  position: absolute;
+  bottom: 8px; left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: rgba(255,255,255,0.85);
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.1);
+  pointer-events: none;
+  z-index: 3;
+}

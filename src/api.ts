@@ -1,4 +1,4 @@
-import type { AppConfig, Playlist, VideoFile } from './types';
+import type { AppConfig, Playlist, VideoFile, SystemStats } from './types';
 
 const BASE = '/api';
 
@@ -35,4 +35,9 @@ export async function savePlaylists(playlists: Playlist[]): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(playlists),
   });
+}
+
+export async function fetchStats(): Promise<SystemStats> {
+  const r = await fetch(`${BASE}/stats`);
+  return r.json();
 }

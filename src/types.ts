@@ -8,6 +8,9 @@ export interface VideoFile {
   size: number;
   mtime: number;
   type: 'video' | 'image';
+  duration?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface AppConfig {
@@ -29,3 +32,20 @@ export interface Playlist {
 export type SortMode = 'name' | 'date' | 'size' | 'folder';
 export type ViewMode = 'grid' | 'folder-group';
 export type GridSize = 'small' | 'medium' | 'large';
+
+export interface SystemStats {
+  timestamp: number;
+  process: {
+    cpuPercent: number;
+    rss: number;
+    heapUsed: number;
+    heapTotal: number;
+  };
+  system: {
+    cpuPercent: number;
+    usedMem: number;
+    totalMem: number;
+    cores: number;
+    loadavg: number[];
+  };
+}
