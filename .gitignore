@@ -27,3 +27,6 @@ dist-ssr/
 # WallStream Configuration Files (Optional: you might want to ignore these if you don't want your local paths in Git)
 wallstream.config.json
 wallstream.playlists.json
+
+# WallStream video metadata cache (runtime-generated, safe to delete)
+.wallstream-cache/
