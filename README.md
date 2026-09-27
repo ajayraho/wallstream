@@ -56,6 +56,12 @@ WallStream is a highly optimized, cross-platform media streaming engine built wi
 ### 🛡️ Precautionary Safeguards
 - **Huge Video Fallback**: WallStream actively protects your browser's hardware decoders. If the backend detects any video file over **500 MB**, it refuses to load the underlying DOM `<video>` tag for that thumbnail. Instead, it renders an aesthetic `⚠️ Huge Video` fallback cover. You can click the cover to instantly spin the heavy file up within the safe, isolated Fullscreen Lightbox environment instead.
 
+### 📦 Zip-Native Streaming
+- Point a folder entry straight at a `.zip` file and WallStream lists and plays the videos inside it — no extraction, ever, even for a 100GB archive.
+- Listing only reads the archive's central directory (kilobytes, regardless of archive size); playback resolves each entry's exact byte offset on demand.
+- **Stored (uncompressed) entries** are served as a direct byte-range read of the zip file itself — zero decompression, zero buffering, instant seeking, identical cost at any archive size.
+- **Deflated entries** are decompressed on the fly with Node's streaming inflater — never buffered fully in memory — and the decompressor is torn down the instant the requested range has been produced, so a small seek doesn't pay for decompressing the whole file.
+
 ### 🗂️ Advanced Media Architecture
 - **JS-Driven Masonry Columns**: Implements an incredibly robust JavaScript scaling algorithm to calculate pixel-perfect flex column grids—entirely eliminating the nasty layout jitter/reflow that kills standard CSS `column-count` layouts when elements lazily unmount.
 - **TV-Mode Autoplay**: When a video finishes playing natively, the global queue immediately grabs the exact next indexed item from your current library/playlist and seamlessly auto-advances.

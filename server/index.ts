@@ -2,6 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { listZipEntries, ZIP_METHOD_STORED, ZIP_METHOD_DEFLATE } from './zip';
+import { streamZipEntry, type ZipVideoRef } from './zipStream';
+import { MIME_MAP } from './mime';
+import { getCachedMeta, enqueueMetaIndex } from './metaCache';
 
 const app = express();
 const PORT = 3001;
@@ -43,6 +48,52 @@ function saveConfig(config: AppConfig) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
+// ── Live resource stats (for the in-app CPU/RAM monitor) ───────────────────
+// Everything here is sampled from Node's own built-ins (process/os) on each
+// request; no dependency, no background timers running when nobody is
+// looking at the panel.
+let lastProcessCpuUsage = process.cpuUsage();
+let lastProcessSampleAt = Date.now();
+let lastSystemCpuTimes = os.cpus().map(c => ({ ...c.times }));
+
+// CPU time used by *this* Node process since the previous sample, expressed
+// as a percentage of a single core (so it can exceed 100% if more than one
+// core's worth of work — e.g. concurrent zlib decompression on the libuv
+// threadpool — happened in the interval).
+function sampleProcessCpuPercent(): number {
+  const now = Date.now();
+  const elapsedMs = now - lastProcessSampleAt;
+  const usage = process.cpuUsage(lastProcessCpuUsage);
+  lastProcessCpuUsage = process.cpuUsage();
+  lastProcessSampleAt = now;
+  if (elapsedMs <= 0) return 0;
+  const busyMicros = usage.user + usage.system;
+  return Math.max(0, (busyMicros / 1000 / elapsedMs) * 100);
+}
+
+// Whole-machine CPU utilization since the previous sample, averaged across
+// all cores (0-100).
+function sampleSystemCpuPercent(): number {
+  const cpus = os.cpus();
+  let idleDelta = 0;
+  let totalDelta = 0;
+  cpus.forEach((cpu, i) => {
+    const prev = lastSystemCpuTimes[i] ?? cpu.times;
+    const idle = cpu.times.idle - prev.idle;
+    const total =
+      (cpu.times.user - prev.user) +
+      (cpu.times.nice - prev.nice) +
+      (cpu.times.sys - prev.sys) +
+      (cpu.times.irq - prev.irq) +
+      idle;
+    idleDelta += idle;
+    totalDelta += total;
+  });
+  lastSystemCpuTimes = cpus.map(c => ({ ...c.times }));
+  if (totalDelta <= 0) return 0;
+  return Math.max(0, Math.min(100, (1 - idleDelta / totalDelta) * 100));
+}
+
 interface VideoFile {
   id: string;
   name: string;
@@ -53,6 +104,32 @@ interface VideoFile {
   size: number;
   mtime: number;
   type: 'video' | 'image';
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+// ── Video IDs ──────────────────────────────────────────────────────────────
+// A plain filesystem video keeps the original scheme: base64url(absolute path).
+// A video that lives inside a zip archive is encoded as base64url of a marker
+// plus a small JSON payload carrying everything /api/video/:id needs to locate
+// its bytes (zip path, entry name, and the entry's central-directory metadata)
+// without re-scanning the archive's central directory on every play request.
+const ZIP_ID_MARKER = 'ZIP1\u0000';
+
+function encodeZipId(ref: ZipVideoRef): string {
+  return Buffer.from(ZIP_ID_MARKER + JSON.stringify(ref), 'utf-8').toString('base64url');
+}
+
+type DecodedId = { kind: 'file'; filePath: string } | { kind: 'zip'; ref: ZipVideoRef };
+
+function decodeId(id: string): DecodedId {
+  const raw = Buffer.from(id, 'base64url').toString('utf-8');
+  if (raw.startsWith(ZIP_ID_MARKER)) {
+    const ref = JSON.parse(raw.slice(ZIP_ID_MARKER.length)) as ZipVideoRef;
+    return { kind: 'zip', ref };
+  }
+  return { kind: 'file', filePath: raw };
 }
 
 function scanFolder(rootFolder: string, includeImages: boolean): VideoFile[] {
@@ -73,7 +150,7 @@ function scanFolder(rootFolder: string, includeImages: boolean): VideoFile[] {
         const ext = path.extname(entry.name).toLowerCase();
         const isVid = VIDEO_EXTENSIONS.has(ext);
         const isImg = IMAGE_EXTENSIONS.has(ext);
-        
+
         if (isVid || (includeImages && isImg)) {
           try {
             const stat = fs.statSync(fullPath);
@@ -100,6 +177,78 @@ function scanFolder(rootFolder: string, includeImages: boolean): VideoFile[] {
   return videos;
 }
 
+// Lists videos (and optionally images) packed inside a .zip archive, without
+// extracting anything: only the archive's central directory is read (tiny,
+// regardless of how large the archive itself is).
+async function scanZipFile(zipPath: string, includeImages: boolean): Promise<VideoFile[]> {
+  let entries;
+  try {
+    entries = await listZipEntries(zipPath);
+  } catch (err) {
+    console.error(`Failed to read zip archive "${zipPath}":`, (err as Error).message);
+    return [];
+  }
+
+  let zipMtime = Date.now();
+  try {
+    zipMtime = fs.statSync(zipPath).mtimeMs;
+  } catch {}
+  const zipName = path.basename(zipPath);
+
+  const videos: VideoFile[] = [];
+  for (const e of entries) {
+    if (e.method !== ZIP_METHOD_STORED && e.method !== ZIP_METHOD_DEFLATE) continue; // unsupported compression
+    if (e.flags & 0x1) continue; // encrypted entry, can't stream without a password
+
+    const entryName = e.name;
+    const ext = path.extname(entryName).toLowerCase();
+    const isVid = VIDEO_EXTENSIONS.has(ext);
+    const isImg = IMAGE_EXTENSIONS.has(ext);
+    if (!isVid && !(includeImages && isImg)) continue;
+
+    const ref: ZipVideoRef = {
+      zipPath,
+      entryName,
+      localHeaderOffset: e.localHeaderOffset,
+      compressedSize: e.compressedSize,
+      uncompressedSize: e.uncompressedSize,
+      method: e.method,
+    };
+
+    let duration: number | undefined;
+    let width: number | undefined;
+    let height: number | undefined;
+    if (isVid) {
+      const cached = getCachedMeta(ref);
+      if (cached === undefined) {
+        enqueueMetaIndex(ref); // not indexed yet — kick off a background pass, don't block this scan
+      } else if (cached) {
+        duration = cached.durationSec;
+        if (cached.width > 0 && cached.height > 0) {
+          width = cached.width;
+          height = cached.height;
+        }
+      }
+    }
+
+    videos.push({
+      id: encodeZipId(ref),
+      name: path.basename(entryName),
+      path: `${zipPath}::${entryName}`,
+      relativePath: entryName,
+      folder: zipPath,
+      folderName: zipName,
+      size: e.uncompressedSize,
+      mtime: e.modifiedMs || zipMtime, // prefer the entry's own timestamp; fall back to the archive's if unparseable
+      type: isVid ? 'video' : 'image',
+      duration,
+      width,
+      height,
+    });
+  }
+  return videos;
+}
+
 // Enable CORS for dev environment, but unnecessary in production since we host on the exact same port
 app.use(cors());
 app.use(express.json());
@@ -123,34 +272,60 @@ app.post('/api/config', (req, res) => {
 });
 
 // GET videos list
-app.get('/api/videos', (_req, res) => {
-  const config = loadConfig();
-  const all: VideoFile[] = [];
-  for (const folder of config.folders) {
-    if (fs.existsSync(folder)) {
-      all.push(...scanFolder(folder, config.includeImages || false));
+app.get('/api/videos', async (_req, res) => {
+  try {
+    const config = loadConfig();
+    const all: VideoFile[] = [];
+    for (const folder of config.folders) {
+      if (!fs.existsSync(folder)) continue;
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(folder);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        all.push(...scanFolder(folder, config.includeImages || false));
+      } else if (st.isFile() && path.extname(folder).toLowerCase() === '.zip') {
+        all.push(...await scanZipFile(folder, config.includeImages || false));
+      }
     }
+    // deduplicate by id
+    const seen = new Set<string>();
+    const unique = all.filter(v => {
+      if (seen.has(v.id)) return false;
+      seen.add(v.id);
+      return true;
+    });
+    res.json(unique);
+  } catch (err) {
+    console.error('Failed to list videos:', err);
+    res.status(500).json({ error: 'Failed to list videos' });
   }
-  // deduplicate by id
-  const seen = new Set<string>();
-  const unique = all.filter(v => {
-    if (seen.has(v.id)) return false;
-    seen.add(v.id);
-    return true;
-  });
-  res.json(unique);
 });
 
 // Stream video
-app.get('/api/video/:id', (req, res) => {
+app.get('/api/video/:id', async (req, res) => {
   const { id } = req.params;
-  let filePath: string;
+  let decoded: DecodedId;
   try {
-    filePath = Buffer.from(id, 'base64url').toString('utf-8');
+    decoded = decodeId(id);
   } catch {
     res.status(400).send('Invalid ID');
     return;
   }
+
+  if (decoded.kind === 'zip') {
+    try {
+      await streamZipEntry(decoded.ref, req, res);
+    } catch (err) {
+      console.error('Failed to stream zip entry:', err);
+      if (!res.headersSent) res.status(500).send('Failed to stream archive entry');
+    }
+    return;
+  }
+
+  const filePath = decoded.filePath;
 
   if (!fs.existsSync(filePath)) {
     res.status(404).send('Not found');
@@ -162,26 +337,7 @@ app.get('/api/video/:id', (req, res) => {
   const range = req.headers.range;
 
   const ext = path.extname(filePath).toLowerCase();
-  const mimeMap: Record<string, string> = {
-    '.mp4': 'video/mp4',
-    '.webm': 'video/webm',
-    '.mkv': 'video/x-matroska',
-    '.mov': 'video/quicktime',
-    '.avi': 'video/x-msvideo',
-    '.m4v': 'video/mp4',
-    '.ogv': 'video/ogg',
-    '.flv': 'video/x-flv',
-    '.wmv': 'video/x-ms-wmv',
-    '.ts': 'video/mp2t',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.avif': 'image/avif',
-  };
-  const contentType = mimeMap[ext] || 'application/octet-stream';
+  const contentType = MIME_MAP[ext] || 'application/octet-stream';
 
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-');
@@ -205,6 +361,29 @@ app.get('/api/video/:id', (req, res) => {
     });
     fs.createReadStream(filePath).pipe(res);
   }
+});
+
+// GET live CPU/RAM stats (server process + whole machine)
+app.get('/api/stats', (_req, res) => {
+  const mem = process.memoryUsage();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  res.json({
+    timestamp: Date.now(),
+    process: {
+      cpuPercent: sampleProcessCpuPercent(),
+      rss: mem.rss,
+      heapUsed: mem.heapUsed,
+      heapTotal: mem.heapTotal,
+    },
+    system: {
+      cpuPercent: sampleSystemCpuPercent(),
+      usedMem: totalMem - freeMem,
+      totalMem,
+      cores: os.cpus().length,
+      loadavg: os.loadavg(),
+    },
+  });
 });
 
 // GET playlists

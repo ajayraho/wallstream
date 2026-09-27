@@ -41,7 +41,7 @@ export default function Settings() {
             <div>
               <div>Video Folders</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginTop: 2 }}>
-                WallStream scans all subfolders recursively
+                WallStream scans all subfolders recursively. You can also point it straight at a .zip archive of videos — it streams them without ever extracting it.
               </div>
             </div>
           </div>
@@ -58,7 +58,7 @@ export default function Settings() {
             <div className="add-row">
               <input
                 id="folder-input"
-                placeholder="e.g. C:\Users\You\Videos"
+                placeholder="e.g. C:\Users\You\Videos or C:\Users\You\videos.zip"
                 value={newFolder}
                 onChange={e => setNewFolder(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addFolder()}
