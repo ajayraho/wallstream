@@ -7,7 +7,7 @@ import PlaylistModal from '../components/PlaylistModal';
 
 export default function Library() {
   const { state, dispatch, updatePlaylists } = useStore();
-  const { videos, playlists, search, sortMode, viewMode, gridSize, loading, error } = state;
+  const { videos, playlists, search, sortMode, sortReverse, viewMode, gridSize, loading, error } = state;
 
   const [cols, setCols] = useState(4);
   const [ctx,         setCtx]         = useState<{ x: number; y: number; video: VideoFile } | null>(null);
@@ -30,8 +30,9 @@ export default function Library() {
         default:       return b.mtime - a.mtime;
       }
     });
+    if (sortReverse) list.reverse();
     return list;
-  }, [videos, search, sortMode]);
+  }, [videos, search, sortMode, sortReverse]);
 
   /* ── Grouped + Visual Queue ── */
   const grouped = useMemo(() => {

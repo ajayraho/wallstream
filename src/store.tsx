@@ -11,6 +11,7 @@ interface State {
   error: string | null;
   search: string;
   sortMode: SortMode;
+  sortReverse: boolean;
   viewMode: ViewMode;
   gridSize: GridSize;
   activePlaylistId: string | null;
@@ -31,6 +32,7 @@ type Action =
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_SEARCH'; payload: string }
   | { type: 'SET_SORT'; payload: SortMode }
+  | { type: 'TOGGLE_SORT_REVERSE' }
   | { type: 'SET_VIEW'; payload: ViewMode }
   | { type: 'SET_GRID_SIZE'; payload: GridSize }
   | { type: 'SET_ACTIVE_PLAYLIST'; payload: string | null }
@@ -55,6 +57,7 @@ function reducer(state: State, action: Action): State {
     case 'SET_ERROR': return { ...state, error: action.payload };
     case 'SET_SEARCH': return { ...state, search: action.payload };
     case 'SET_SORT': return { ...state, sortMode: action.payload };
+    case 'TOGGLE_SORT_REVERSE': return { ...state, sortReverse: !state.sortReverse };
     case 'SET_VIEW': return { ...state, viewMode: action.payload };
     case 'SET_GRID_SIZE': return { ...state, gridSize: action.payload };
     case 'SET_ACTIVE_PLAYLIST': return { ...state, activePlaylistId: action.payload };
@@ -81,6 +84,7 @@ const initial: State = {
   error: null,
   search: '',
   sortMode: 'date',
+  sortReverse: false,
   viewMode: 'grid',
   gridSize: 'medium',
   activePlaylistId: null,
