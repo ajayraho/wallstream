@@ -55,12 +55,16 @@ WallStream is a highly optimized, cross-platform media streaming engine built wi
 
 ### 🛡️ Precautionary Safeguards
 - **Huge Video Fallback**: WallStream actively protects your browser's hardware decoders. If the backend detects any video file over **500 MB**, it refuses to load the underlying DOM `<video>` tag for that thumbnail. Instead, it renders an aesthetic `⚠️ Huge Video` fallback cover. You can click the cover to instantly spin the heavy file up within the safe, isolated Fullscreen Lightbox environment instead.
+- **Live System Monitor**: A small panel tucked in the top corner shows real-time CPU and RAM usage — both for the WallStream server process and the whole machine — as rolling green/yellow/red graphs, sampled entirely from Node's own built-ins with zero added dependencies.
+- **Scroll-Aware Loading**: Videos only start streaming after they've settled in view for a moment (not on every frame you scroll past), so flicking through a huge library doesn't spike your CPU loading dozens of videos you never meant to watch.
 
 ### 📦 Zip-Native Streaming
 - Point a folder entry straight at a `.zip` file and WallStream lists and plays the videos inside it — no extraction, ever, even for a 100GB archive.
 - Listing only reads the archive's central directory (kilobytes, regardless of archive size); playback resolves each entry's exact byte offset on demand.
 - **Stored (uncompressed) entries** are served as a direct byte-range read of the zip file itself — zero decompression, zero buffering, instant seeking, identical cost at any archive size.
 - **Deflated entries** are decompressed on the fly with Node's streaming inflater — never buffered fully in memory — and the decompressor is torn down the instant the requested range has been produced, so a small seek doesn't pay for decompressing the whole file.
+- Each video's own last-modified timestamp is read straight from its zip entry (not the archive file's), so sorting a zip-hosted library by Date reflects the individual files, not just when the archive itself was last written.
+- Video duration and dimensions are extracted once via a lightweight background pass (a from-scratch MP4/MOV box parser, no dependencies) and cached to disk, so cards can show accurate info without ever mounting a `<video>` element just to inspect it.
 
 ### 🗂️ Advanced Media Architecture
 - **JS-Driven Masonry Columns**: Implements an incredibly robust JavaScript scaling algorithm to calculate pixel-perfect flex column grids—entirely eliminating the nasty layout jitter/reflow that kills standard CSS `column-count` layouts when elements lazily unmount.
@@ -71,7 +75,7 @@ WallStream is a highly optimized, cross-platform media streaming engine built wi
 - Instant, sub-second deep folder scanning for media files.
 - Advanced keyboard shortcuts (`Esc` double-tap killswitches, `< / >` 5-second Arrow keys seeking, `Space` toggles).
 - Local, completely portable customizable Playlists with persistent JSON config backups.
-- Dynamic group-by folder sizes, sorting algorithms, and grid size modes.
+- Dynamic group-by folder sizes, sorting algorithms, and grid size modes — with a one-click reverse toggle for whichever sort you're using.
 
 <p align="center">
   <img src="readme/ss3.png" alt="Playlist panel" width="550" />
