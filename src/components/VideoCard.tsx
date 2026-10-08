@@ -8,10 +8,10 @@ import { useStore } from '../store';
 const DWELL_MS = 220;
 
 // Touch screens have no hover. Pressing a card and holding for this long starts a
-// muted preview that keeps playing after the finger lifts. A normal tap still opens
+// preview (follows the global mute setting) that keeps playing after the finger lifts. A normal tap still opens
 // the lightbox as usual.
 const LONG_PRESS_MS = 350;
-const LONG_PRESS_SLOP_PX = 10; // finger drift allowed before it counts as a scroll/drag
+const LONG_PRESS_SLOP_PX = 14; // finger drift allowed while holding before it counts as a scroll/drag
 
 // Only one touch preview plays at a time: starting a new one stops the previous.
 let stopActiveTouchPreview: (() => void) | null = null;
@@ -96,9 +96,15 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
     const shouldPlay = state.wallMode ? visible : (hovered || touchPreview);
     
     if (shouldPlay) {
-      vid.muted = state.muted || (touchPreview && !hovered); // touch previews are always muted
+      vid.muted = state.muted; // follows the global mute button, same as hover previews
       vid.loop = true;
-      vid.play().catch(() => {});
+      vid.play().catch(() => {
+        // If the browser refuses sound for a touch preview, play it muted rather than not at all
+        if (touchPreview && !hovered && !vid.muted) {
+          vid.muted = true;
+          vid.play().catch(() => {});
+        }
+      });
     } else {
       vid.pause();
       if (!state.wallMode) vid.currentTime = 0;
@@ -141,19 +147,29 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
     if (e.pointerType !== 'touch' || video.type !== 'video' || isHuge) return;
     clearPress();
     pressStart.current = { x: e.clientX, y: e.clientY };
-    pressTimer.current = window.setTimeout(() => {
-      pressTimer.current = null;
-      pressStart.current = null;
-      suppressClick.current = true; // the lift after a long press must not open the lightbox
-      setTouchPreview(true);
-      navigator.vibrate?.(15);
-    }, LONG_PRESS_MS);
+    pressTimer.current = window.setTimeout(startTouchPreviewNow, LONG_PRESS_MS);
+  };
+
+  const startTouchPreviewNow = () => {
+    clearPress();
+    suppressClick.current = true; // the lift after this gesture must not open the lightbox
+    setTouchPreview(true);
+    navigator.vibrate?.(15);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const s = pressStart.current;
     if (!s || pressTimer.current === null) return;
-    if (Math.abs(e.clientX - s.x) > LONG_PRESS_SLOP_PX || Math.abs(e.clientY - s.y) > LONG_PRESS_SLOP_PX) clearPress();
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    // Running a finger sideways across the card starts the preview right away
+    // (cards only pan vertically, so a sideways drag is ours).
+    if (Math.abs(dx) > LONG_PRESS_SLOP_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      startTouchPreviewNow();
+      return;
+    }
+    // Moving mostly up/down is the page scrolling — never a preview.
+    if (Math.abs(dx) > LONG_PRESS_SLOP_PX || Math.abs(dy) > LONG_PRESS_SLOP_PX) clearPress();
   };
 
   useEffect(() => clearPress, []); // clear any pending timer on unmount
@@ -231,7 +247,7 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
   return (
     <div
       ref={cardRef}
-      className="vcard"
+      className={`vcard${touchPreview ? ' touch-preview' : ''}`}
       style={{ animationDelay: `${Math.min(index, 20) * 35}ms`, paddingBottom: `${(1 / aspect) * 100}%` }}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}

@@ -1041,5 +1041,13 @@ body {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+    touch-action: pan-y pinch-zoom; /* vertical = page scroll; sideways drags reach our preview handler */
   }
 }
+/* Same highlight a mouse hover gives, for a card being previewed by touch */
+.vcard.touch-preview {
+  border-color: rgba(124,106,255,0.6);
+  box-shadow: 0 0 16px 2px rgba(124,106,255,0.25), 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 2;
+}
+.vcard.touch-preview .vcard-ph { opacity: 0; }
