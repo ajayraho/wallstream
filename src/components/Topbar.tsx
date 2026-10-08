@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import type { GridSize, SortMode } from '../types';
 import SystemMonitor from './SystemMonitor';
@@ -13,21 +14,39 @@ export default function Topbar({ page, onPage }: Props) {
   const { state, dispatch } = useStore();
   const { search, sortMode, sortReverse, viewMode, gridSize, muted } = state;
 
-  return (
-    <header className="topbar">
-      {/* Logo + nav */}
-      <span className="logo" style={{ cursor: 'pointer' }} onClick={() => onPage('library')}>WallStream</span>
+  // Mobile-only drawer (CSS hides the burger + drawer behaviour on wide screens)
+  const [menuOpen, setMenuOpen] = useState(false);
 
-      <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  const goPage = (p: Page) => {
+    setMenuOpen(false);
+    onPage(p);
+  };
+
+  return (
+    <>
+    {menuOpen && <div className="tb-backdrop" onClick={() => setMenuOpen(false)} />}
+    <header className={`topbar${menuOpen ? ' menu-open' : ''}`}>
+      {/* Logo + nav */}
+      <span className="logo" style={{ cursor: 'pointer' }} onClick={() => goPage('library')}>WallStream</span>
+
+      <div className="tb-nav">
         {(['library', 'playlists', 'settings'] as Page[]).map(p => (
           <button
             key={p}
             className={`tb-btn${page === p ? ' active' : ''}`}
             id={`nav-${p}`}
-            onClick={() => onPage(p)}
+            onClick={() => goPage(p)}
             title={p === 'library' ? 'Library' : p === 'playlists' ? 'Playlists' : 'Settings'}
           >
             {p === 'library' ? '⊞' : p === 'playlists' ? '🎵' : '⚙'}
+            <span className="tb-label">{p === 'library' ? 'Library' : p === 'playlists' ? 'Playlists' : 'Settings'}</span>
           </button>
         ))}
       </div>
@@ -149,9 +168,25 @@ export default function Topbar({ page, onPage }: Props) {
       )}
 
       {/* Always visible, regardless of page */}
-      <div style={{ marginLeft: page === 'library' ? 0 : 'auto' }}>
+      <div className="tb-mon" style={{ marginLeft: page === 'library' ? 0 : 'auto' }}>
         <SystemMonitor />
       </div>
+
+      {/* Hamburger — mobile only (hidden by CSS on wide screens) */}
+      <button
+        className={`ico-btn tb-burger${menuOpen ? ' active' : ''}`}
+        id="btn-menu"
+        title={menuOpen ? 'Close menu' : 'Menu'}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen(o => !o)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" width={16} height={16}>
+          {menuOpen
+            ? (<><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>)
+            : (<><line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" /></>)}
+        </svg>
+      </button>
     </header>
+    </>
   );
 }

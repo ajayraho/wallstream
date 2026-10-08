@@ -300,6 +300,9 @@ body {
   z-index: 20;
 }
 .vcard:hover .vcard-actions, .vcard-actions.force-show { opacity: 1; }
+/* Empty parts of the strip shouldn't swallow taps meant to open the video; the buttons themselves stay tappable */
+.vcard-actions { pointer-events: none; }
+.vcard-actions > * { pointer-events: auto; }
 
 .vcard-act-btn {
   width: 28px; height: 28px;
@@ -947,4 +950,96 @@ body {
   border: 1px solid rgba(255,255,255,0.1);
   pointer-events: none;
   z-index: 3;
+}
+
+/* ─── Topbar: wide-screen defaults for the mobile drawer bits ─── */
+.tb-nav { display: flex; gap: 4px; margin-left: 8px; }
+.tb-label { display: none; }
+.tb-burger { display: none; }
+.tb-backdrop { display: none; }
+
+/* ─── Mobile: collapse controls into a slide-down drawer ───────── */
+@media (max-width: 960px) {
+  .topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    flex-wrap: wrap;
+    align-content: flex-start;
+    padding: 10px 12px;
+    gap: 10px;
+    row-gap: 0;
+  }
+  .topbar.menu-open { background: rgba(8, 12, 20, 0.97); }
+  .topbar .logo { order: 0; }
+  .topbar .search-wrap { order: 1; max-width: none; margin: 0; min-width: 0; }
+  .topbar .tb-burger { order: 2; display: flex; margin-left: auto; flex-shrink: 0; }
+
+  /* Drawer items: hidden until the burger is tapped */
+  .topbar .tb-nav,
+  .topbar .topbar-right,
+  .topbar .tb-mon { display: none; }
+
+  .topbar.menu-open .tb-nav,
+  .topbar.menu-open .topbar-right,
+  .topbar.menu-open .tb-mon {
+    display: flex;
+    flex: 0 0 100%;
+    animation: tb-drop 0.2s var(--ease) both;
+  }
+  .topbar.menu-open .tb-nav {
+    order: 10;
+    margin: 10px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    gap: 8px;
+  }
+  .topbar.menu-open .tb-nav .tb-btn { flex: 1; justify-content: center; height: 40px; }
+  .topbar.menu-open .tb-label { display: inline; }
+
+  .topbar.menu-open .topbar-right {
+    order: 11;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0;
+    padding: 12px 0 2px;
+  }
+  .topbar.menu-open .topbar-right > .ico-btn { margin-right: 0 !important; }
+  .topbar.menu-open .topbar-right .ico-btn { width: 40px; height: 40px; }
+  .topbar.menu-open .topbar-right .seg button { padding: 7px 12px; }
+
+  .topbar.menu-open .tb-mon {
+    order: 12;
+    margin: 0 !important;
+    padding: 10px 0 4px;
+    border-top: 1px solid var(--border);
+    margin-top: 10px !important;
+    justify-content: flex-start;
+  }
+  .topbar .sysmon-panel { left: 0; right: auto; }
+
+  .tb-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(0, 0, 0, 0.45);
+    animation: tb-fade 0.2s ease both;
+  }
+
+  .page { padding: calc(var(--topbar-h) + 14px) 12px 32px; }
+}
+
+@keyframes tb-drop {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes tb-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Touch screens: stop the OS long-press callout / text selection from fighting the preview gesture */
+@media (pointer: coarse) {
+  .vcard {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
