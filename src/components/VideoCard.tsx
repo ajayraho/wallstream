@@ -7,6 +7,15 @@ import { useStore } from '../store';
 // avoids paying the real streaming/decoding cost for cards you scroll straight past.
 const DWELL_MS = 220;
 
+// Touch screens have no hover. Pressing a card and holding for this long starts a
+// muted preview that keeps playing after the finger lifts. A normal tap still opens
+// the lightbox as usual.
+const LONG_PRESS_MS = 350;
+const LONG_PRESS_SLOP_PX = 10; // finger drift allowed before it counts as a scroll/drag
+
+// Only one touch preview plays at a time: starting a new one stops the previous.
+let stopActiveTouchPreview: (() => void) | null = null;
+
 interface Props {
   video: VideoFile;
   index: number;
@@ -27,6 +36,11 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
   const [aspect,  setAspect]    = useState<number>(video.width && video.height ? video.width / video.height : 16/9);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [srcLoaded, setSrcLoaded] = useState(false);
+  const [touchPreview, setTouchPreview] = useState(false);
+  const lastPointerType = useRef<string>('mouse');
+  const pressTimer = useRef<number | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const suppressClick = useRef(false);
 
   const isHuge = video.type === 'video' && video.size > 500 * 1024 * 1024;
 
@@ -79,20 +93,74 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
     const vid = videoRef.current;
     if (!vid) return;
 
-    const shouldPlay = state.wallMode ? visible : hovered;
+    const shouldPlay = state.wallMode ? visible : (hovered || touchPreview);
     
     if (shouldPlay) {
-      vid.muted = state.muted;
+      vid.muted = state.muted || (touchPreview && !hovered); // touch previews are always muted
       vid.loop = true;
       vid.play().catch(() => {});
     } else {
       vid.pause();
       if (!state.wallMode) vid.currentTime = 0;
     }
-  }, [visible, hovered, state.wallMode, state.muted, video.type, srcLoaded]);
+  }, [visible, hovered, touchPreview, state.wallMode, state.muted, video.type, srcLoaded]);
+
+  /* ── Touch preview lifecycle ── */
+  // Stops when: another card starts previewing, the card scrolls out of view,
+  // or the user touches anywhere outside this card. Lifting the finger does NOT stop it.
+  useEffect(() => {
+    if (!visible) setTouchPreview(false);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!touchPreview) return;
+    const stop = () => setTouchPreview(false);
+    if (stopActiveTouchPreview && stopActiveTouchPreview !== stop) stopActiveTouchPreview();
+    stopActiveTouchPreview = stop;
+    const onDown = (e: PointerEvent) => {
+      if (!cardRef.current?.contains(e.target as Node)) stop();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      if (stopActiveTouchPreview === stop) stopActiveTouchPreview = null;
+    };
+  }, [touchPreview]);
+
+  const clearPress = () => {
+    if (pressTimer.current !== null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressStart.current = null;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    lastPointerType.current = e.pointerType;
+    suppressClick.current = false;
+    if (e.pointerType !== 'touch' || video.type !== 'video' || isHuge) return;
+    clearPress();
+    pressStart.current = { x: e.clientX, y: e.clientY };
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      pressStart.current = null;
+      suppressClick.current = true; // the lift after a long press must not open the lightbox
+      setTouchPreview(true);
+      navigator.vibrate?.(15);
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const s = pressStart.current;
+    if (!s || pressTimer.current === null) return;
+    if (Math.abs(e.clientX - s.x) > LONG_PRESS_SLOP_PX || Math.abs(e.clientY - s.y) > LONG_PRESS_SLOP_PX) clearPress();
+  };
+
+  useEffect(() => clearPress, []); // clear any pending timer on unmount
 
   /* ── Play on hover ── */
   const handleEnter = useCallback(() => {
+    if (lastPointerType.current === 'touch') return; // ignore the fake hover phones emit after a tap
     setHovered(true);
   }, []);
 
@@ -110,7 +178,7 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
   };
 
   const handleTimeUpdate = () => {
-    if (hovered && videoRef.current) {
+    if ((hovered || touchPreview) && videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
     }
   };
@@ -167,8 +235,21 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
       style={{ animationDelay: `${Math.min(index, 20) * 35}ms`, paddingBottom: `${(1 / aspect) * 100}%` }}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
-      onClick={() => onOpen(video)}
-      onContextMenu={e => { e.preventDefault(); onCtx(e, video); }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={clearPress}
+      onPointerCancel={clearPress}
+      onClick={() => {
+        if (suppressClick.current) { suppressClick.current = false; return; }
+        setTouchPreview(false);
+        onOpen(video);
+      }}
+      onContextMenu={e => {
+        e.preventDefault();
+        // On touch, a long press means "preview" for videos, not "open the context menu"
+        if (lastPointerType.current === 'touch' && video.type === 'video' && !isHuge) return;
+        onCtx(e, video);
+      }}
       id={`vc-${video.id}`}
     >
       {video.type === 'image' ? (
@@ -263,7 +344,7 @@ export default function VideoCard({ video, index, onOpen, onCtx, onAddPlaylist }
       </div>
 
       {!isHuge && video.type === 'video' && (
-        <div className="vcard-slider-track" style={{ opacity: hovered ? 1 : 0 }}>
+        <div className="vcard-slider-track" style={{ opacity: hovered || touchPreview ? 1 : 0 }}>
           <div className="vcard-slider-fill" style={{ width: `${(currentTime / duration) * 100}%` }} />
         </div>
       )}
